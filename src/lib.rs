@@ -14,6 +14,7 @@ pub struct GermanStr {
 }
 
 impl Drop for GermanStr {
+    #[inline]
     fn drop(&mut self) {
         if self.len as usize > MAX_INLINE_CHARS {
             let ptr = self.ptr.cast_mut();
@@ -26,6 +27,7 @@ impl Drop for GermanStr {
 }
 
 impl Clone for GermanStr {
+    #[inline]
     fn clone(&self) -> Self {
         if self.len as usize <= MAX_INLINE_CHARS {
             let mut res = GermanStr::default();
@@ -40,6 +42,7 @@ impl Clone for GermanStr {
 }
 
 impl GermanStr {
+    #[inline]
     pub fn new<T>(src: T) -> Option<Self>
     where
         T: AsRef<str>,
@@ -115,7 +118,7 @@ impl GermanStr {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn as_str(&self) -> &str {
         Deref::deref(self)
     }
@@ -138,10 +141,6 @@ impl GermanStr {
     #[inline(always)]
     pub const fn is_heap_allocated(&self) -> bool {
         self.len as usize > MAX_INLINE_CHARS
-    }
-
-    fn from_char_iter() {
-        todo!()
     }
 }
 
@@ -168,70 +167,22 @@ impl Deref for GermanStr {
 }
 
 impl PartialEq<GermanStr> for GermanStr {
+    #[inline(always)]
     fn eq(&self, other: &GermanStr) -> bool {
         self.prefix == other.prefix && self.suffix() == other.suffix()
     }
 }
 
-impl Eq for GermanStr {}
-
-
-impl PartialEq<str> for GermanStr {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-
-impl PartialEq<GermanStr> for str {
-    fn eq(&self, other: &GermanStr) -> bool {
-        other == self
-    }
-}
-
-impl<'a> PartialEq<&'a str> for GermanStr {
-    fn eq(&self, other: &&'a str) -> bool {
-        self == *other
-    }
-}
-
-impl<'a> PartialEq<GermanStr> for &'a str {
-    fn eq(&self, other: &GermanStr) -> bool {
-        *self == other
-    }
-}
-
-impl PartialEq<String> for GermanStr {
-    fn eq(&self, other: &String) -> bool {
-        self.as_str() == other
-    }
-}
-
-impl PartialEq<GermanStr> for String {
-    fn eq(&self, other: &GermanStr) -> bool {
-        other == self
-    }
-}
-
-impl<'a> PartialEq<&'a String> for GermanStr {
-    fn eq(&self, other: &&'a String) -> bool {
-        self == *other
-    }
-}
-
-impl<'a> PartialEq<GermanStr> for &'a String {
-    fn eq(&self, other: &GermanStr) -> bool {
-        *self == other
-    }
-}
-
 impl Ord for GermanStr {
     #[cfg(target_endian = "little")]
+    #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.prefix.swap_bytes().cmp(&other.prefix.swap_bytes())
             .then_with(|| self.suffix().cmp(other.suffix()))
     }
 
     #[cfg(target_endian = "big")]
+    #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.prefix.cmp(&other.prefix)
             .then_with(|| self.suffix().cmp(other.suffix()))
@@ -239,19 +190,92 @@ impl Ord for GermanStr {
 }
 
 
+impl Eq for GermanStr {}
+
+
+impl PartialEq<str> for GermanStr {
+    #[inline(always)]
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<GermanStr> for str {
+    #[inline(always)]
+    fn eq(&self, other: &GermanStr) -> bool {
+        other == self
+    }
+}
+
+impl<'a> PartialEq<&'a str> for GermanStr {
+    #[inline(always)]
+    fn eq(&self, other: &&'a str) -> bool {
+        self == *other
+    }
+}
+
+impl<'a> PartialEq<GermanStr> for &'a str {
+    #[inline(always)]
+    fn eq(&self, other: &GermanStr) -> bool {
+        *self == other
+    }
+}
+
+impl PartialEq<String> for GermanStr {
+    #[inline(always)]
+    fn eq(&self, other: &String) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<GermanStr> for String {
+    #[inline(always)]
+    fn eq(&self, other: &GermanStr) -> bool {
+        other == self
+    }
+}
+
+impl<'a> PartialEq<&'a String> for GermanStr {
+    #[inline(always)]
+    fn eq(&self, other: &&'a String) -> bool {
+        self == *other
+    }
+}
+
+impl<'a> PartialEq<GermanStr> for &'a String {
+    #[inline(always)]
+    fn eq(&self, other: &GermanStr) -> bool {
+        *self == other
+    }
+}
+
 impl PartialOrd for GermanStr {
+    #[inline(always)]
     fn partial_cmp(&self, other: &GermanStr) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
+impl Default for GermanStr {
+    #[inline(always)]
+    fn default() -> GermanStr {
+        GermanStr {
+            len: 0,
+            prefix: 0,
+            ptr: null(),
+        }
+    }
+}
+
 impl std::hash::Hash for GermanStr {
+    #[inline(always)]
     fn hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
         self.as_str().hash(hasher);
     }
 }
 
 impl std::fmt::Display for GermanStr {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         std::fmt::Display::fmt(self.as_str(), f)
     }
@@ -346,18 +370,8 @@ impl FromStr for GermanStr {
     }
 }
 
-impl Default for GermanStr {
-    #[inline(always)]
-    fn default() -> GermanStr {
-        GermanStr {
-            len: 0,
-            prefix: 0,
-            ptr: null(),
-        }
-    }
-}
-
 impl std::fmt::Debug for GermanStr {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         std::fmt::Debug::fmt(self.as_str(), f)
     }
