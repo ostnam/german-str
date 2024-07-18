@@ -74,6 +74,9 @@ impl GermanStr {
         let ptr = unsafe {
             let layout  = std::alloc::Layout::array::<u8>(src.len()).ok()?;
             let buf: *mut u8 = std::alloc::alloc(layout);
+            if buf.is_null() {
+                handle_alloc_error(layout);
+            }
             let as_slice = std::slice::from_raw_parts_mut(buf, src.len());
             as_slice[..].clone_from_slice(src.as_bytes());
             buf
