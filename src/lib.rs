@@ -169,7 +169,7 @@ impl Deref for GermanStr {
 
 impl PartialEq<GermanStr> for GermanStr {
     fn eq(&self, other: &GermanStr) -> bool {
-        self.as_str() == other.as_str()
+        self.prefix == other.prefix && self.suffix() == other.suffix()
     }
 }
 
