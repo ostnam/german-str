@@ -6,4 +6,10 @@ edition = "2021"
 [dependencies]
 
 [dev-dependencies]
+criterion = "0.5.1"
 proptest = "1.5.0"
+rand = "0.8.5"
+
+[[bench]]
+name = "bench_vec_sorting"
+harness = false
