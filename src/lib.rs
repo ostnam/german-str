@@ -1,6 +1,7 @@
+use std::alloc::handle_alloc_error;
 use std::borrow::{Borrow, Cow};
 use std::ops::Deref;
-use std::ptr::null;
+use std::ptr::{null, NonNull};
 use std::str::FromStr;
 
 pub const MAX_INLINE_CHARS: usize = 12;
@@ -118,7 +119,12 @@ impl GermanStr {
         let suffix_len = self.len().saturating_sub(4) as usize;
         if self.len() <= MAX_INLINE_CHARS {
             unsafe {
-                std::slice::from_raw_parts(self.ptr, suffix_len)
+                let ptr = if self.ptr.is_null() {
+                    NonNull::dangling().as_ptr()
+                } else {
+                    self.ptr
+                };
+                std::slice::from_raw_parts(ptr, suffix_len)
             }
         } else {
             unsafe {
