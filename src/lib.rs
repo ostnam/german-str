@@ -29,10 +29,15 @@ impl Drop for GermanStr {
         if self.len as usize > MAX_INLINE_CHARS {
             let ptr = self.ptr.cast_mut();
             unsafe {
-                let layout  = std::alloc::Layout::array::<u8>(self.len as usize).unwrap_unchecked();
+                // Safety: this call can only fail if self.len is too long.
+                // We can only create a long `GermanStr` using GermanStr::new: if `self.len`
+                // was too long, we'd get an error when we try to create the GermanStr.
+                let layout = std::alloc::Layout::array::<u8>(self.len as usize).unwrap_unchecked();
                 std::alloc::dealloc(ptr, layout);
             }
         }
+        // In the case where len <= MAX_INLINE_CHARS, no heap data is owned and
+        // no deallocation is needed.
     }
 }
 
