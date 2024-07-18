@@ -169,8 +169,8 @@ impl Deref for GermanStr {
     fn deref(&self) -> &str {
         let len = self.len as usize;
         if len <= MAX_INLINE_CHARS {
+            let prefix_addr: *const u32 = &self.prefix;
             unsafe {
-                let prefix_addr: *const u32 = &self.prefix;
                 let ptr = std::mem::transmute(prefix_addr);
                 let slice = std::slice::from_raw_parts(ptr, len);
                 std::str::from_utf8_unchecked(slice)
