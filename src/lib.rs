@@ -13,6 +13,15 @@ pub struct GermanStr {
     ptr: *const u8,
 }
 
+// Safety: According to the rustonomicon, "something can safely be Send unless it shares mutable
+// state with something else without enforcing exclusive access to it."
+// The `ptr` is never shared between `GermanStr`, so there's no shared mutable state.
+unsafe impl Send for GermanStr {}
+
+// Safety: Again, according to the rustonomicon, there's no issue here since GermanStr are
+// immutable.
+unsafe impl Sync for GermanStr {}
+
 impl Drop for GermanStr {
     #[inline]
     fn drop(&mut self) {
