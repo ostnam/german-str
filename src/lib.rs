@@ -16,8 +16,8 @@ pub struct GermanStr {
 impl Drop for GermanStr {
     fn drop(&mut self) {
         if self.len as usize > MAX_INLINE_CHARS {
+            let ptr = self.ptr.cast_mut();
             unsafe {
-                let ptr = std::mem::transmute(self.ptr);
                 let layout  = std::alloc::Layout::array::<u8>(self.len as usize).unwrap_unchecked();
                 std::alloc::dealloc(ptr, layout);
             }
