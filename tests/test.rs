@@ -19,7 +19,20 @@ fn test_new() {
     );
 }
 
+#[test]
+fn assert_traits() {
+    fn f<T: Send + Sync + ::std::fmt::Debug + Clone>() {}
+    f::<GermanStr>();
+}
+
 proptest! {
+    #[test]
+    fn conversion(src: String) {
+        let german = GermanStr::new(&src).unwrap();
+        let end = String::from(german);
+        assert_eq!(src, end);
+    }
+
     #[test]
     fn ordering(lhs: String, rhs: String) {
         let german_lhs = GermanStr::new(&lhs).unwrap();
