@@ -1,5 +1,4 @@
 use std::borrow::{Borrow, Cow};
-use std::convert::Infallible;
 use std::ops::Deref;
 use std::ptr::null;
 use std::str::FromStr;
@@ -14,7 +13,6 @@ pub struct GermanStr {
     ptr: *const u8,
 }
 
-
 impl Drop for GermanStr {
     fn drop(&mut self) {
         if self.len as usize > MAX_INLINE_CHARS {
@@ -23,6 +21,20 @@ impl Drop for GermanStr {
                 let layout  = std::alloc::Layout::array::<u8>(self.len as usize).unwrap_unchecked();
                 std::alloc::dealloc(ptr, layout);
             }
+        }
+    }
+}
+
+impl Clone for GermanStr {
+    fn clone(&self) -> Self {
+        if self.len as usize <= MAX_INLINE_CHARS {
+            let mut res = GermanStr::default();
+            unsafe {
+                std::ptr::copy_nonoverlapping(self, &mut res, 1);
+            }
+            res
+        } else {
+            GermanStr::new(self.as_str()).unwrap()
         }
     }
 }
