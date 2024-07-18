@@ -1,4 +1,5 @@
 use german_str::GermanStr;
+use proptest::proptest;
 
 #[test]
 #[cfg(target_pointer_width = "64")]
@@ -16,4 +17,20 @@ fn test_new() {
         GermanStr::new("too long to fit on the stack").unwrap().as_str(),
         "too long to fit on the stack",
     );
+}
+
+proptest! {
+    #[test]
+    fn ordering(lhs: String, rhs: String) {
+        let german_lhs = GermanStr::new(&lhs).unwrap();
+        let german_rhs = GermanStr::new(&rhs).unwrap();
+        assert_eq!(lhs.cmp(&rhs), german_lhs.cmp(&german_rhs));
+    }
+
+    #[test]
+    fn equality(lhs: String, rhs: String) {
+        let german_lhs = GermanStr::new(&lhs).unwrap();
+        let german_rhs = GermanStr::new(&rhs).unwrap();
+        assert_eq!(lhs == rhs, german_lhs == german_rhs);
+    }
 }

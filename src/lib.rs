@@ -213,6 +213,13 @@ impl<'a> PartialEq<GermanStr> for &'a String {
 }
 
 impl Ord for GermanStr {
+    #[cfg(target_endian = "little")]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.prefix.swap_bytes().cmp(&other.prefix.swap_bytes())
+            .then_with(|| self.suffix().cmp(other.suffix()))
+    }
+
+    #[cfg(target_endian = "big")]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.prefix.cmp(&other.prefix)
             .then_with(|| self.suffix().cmp(other.suffix()))
