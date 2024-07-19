@@ -1,3 +1,5 @@
+#![cfg(target_pointer_width = "64")]
+
 use std::alloc::handle_alloc_error;
 use std::borrow::{Borrow, Cow};
 use std::ops::Deref;
