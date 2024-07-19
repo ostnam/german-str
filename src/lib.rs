@@ -15,8 +15,21 @@ pub const MAX_LEN: usize = 2_usize.pow(32);
 
 #[repr(C)]
 pub struct GermanStr {
+    /// Number of chars of the string.
     len: u32,
+
+    /// The first 4 bytes of the string.
+    /// If the string has less than 4 bytes, the extra bytes are set to 0.
+    /// Since an UTF-8 char can consist of 1-4 bytes, it cannot be interpreted
+    /// as chars.
+    /// This prefix can still be used to speed up comparisons because UTF-8 strings
+    /// are sorted byte-wise.
     prefix: u32,
+
+    /// If the string is longer than 12 bytes, is an owning, unique pointer to the
+    /// chars on the heap.
+    /// Otherwise, is an `[u8; 8]`, with extra bytes set to 0.
+    /// The prefix is also included on the heap.
     ptr: *const u8,
 }
 
