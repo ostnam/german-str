@@ -63,12 +63,12 @@ impl Drop for GermanStr {
 impl Clone for GermanStr {
     #[inline]
     fn clone(&self) -> Self {
-            let mut res = GermanStr::default();
-            unsafe {
-                std::ptr::copy_nonoverlapping(self, &mut res, 1);
         if self.len as usize <= MAX_INLINE_BYTES {
+            GermanStr {
+                len: self.len,
+                prefix: self.prefix,
+                ptr: self.ptr,
             }
-            res
         } else {
             GermanStr::new(self.as_str()).unwrap()
         }
