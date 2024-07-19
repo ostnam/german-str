@@ -88,23 +88,19 @@ impl GermanStr {
         if src.len() <= MAX_INLINE_BYTES {
             return Some(GermanStr::new_inline(src));
         }
-        let prefix = unsafe {
-            let mut buf = [0; 4];
-            for i in 0..src.len().min(4) {
-                buf[i] = src.as_bytes()[i];
-            }
-            std::mem::transmute(buf)
-        };
-        let ptr = unsafe {
-            let layout  = std::alloc::Layout::array::<u8>(src.len()).ok()?;
-            let buf: *mut u8 = std::alloc::alloc(layout);
-            if buf.is_null() {
-                handle_alloc_error(layout);
-            }
-            let as_slice = std::slice::from_raw_parts_mut(buf, src.len());
-            as_slice[..].clone_from_slice(src.as_bytes());
-            buf
-        };
+
+        let mut buf = [0; 4];
+        for i in 0..src.len().min(4) {
+            buf[i] = src.as_bytes()[i];
+        }
+        let prefix = unsafe { std::mem::transmute(buf) };
+        let layout  = std::alloc::Layout::array::<u8>(src.len()).ok()?;
+        let ptr = unsafe { std::alloc::alloc(layout) };
+        if ptr.is_null() {
+            handle_alloc_error(layout);
+        }
+        let slice = unsafe { std::slice::from_raw_parts_mut(ptr, src.len()) };
+        slice.clone_from_slice(src.as_bytes());
         Some(GermanStr {
             len: src.len() as u32,
             prefix,
