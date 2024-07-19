@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use german_str::GermanStr;
 use proptest::proptest;
 
@@ -5,6 +7,12 @@ use proptest::proptest;
 #[cfg(target_pointer_width = "64")]
 fn is_2_bytes() {
     assert_eq!(std::mem::size_of::<GermanStr>(), 16)
+}
+
+#[test]
+fn assert_traits() {
+    fn f<T: Send + Sync + ::std::fmt::Debug + Clone>() {}
+    f::<GermanStr>();
 }
 
 #[test]
@@ -20,9 +28,10 @@ fn test_new() {
 }
 
 #[test]
-fn assert_traits() {
-    fn f<T: Send + Sync + ::std::fmt::Debug + Clone>() {}
-    f::<GermanStr>();
+fn test_equality() {
+    let a = GermanStr::new("aaaa").unwrap();
+    let b = GermanStr::new("aaaab").unwrap();
+    assert_ne!(a, b);
 }
 
 proptest! {
@@ -31,6 +40,12 @@ proptest! {
         let german = GermanStr::new(&src).unwrap();
         let end = String::from(german);
         assert_eq!(src, end);
+    }
+
+    #[test]
+    fn deref(src: String) {
+        let german = GermanStr::new(&src).unwrap();
+        assert_eq!(&src, Deref::deref(&german));
     }
 
     #[test]
@@ -45,5 +60,11 @@ proptest! {
         let german_lhs = GermanStr::new(&lhs).unwrap();
         let german_rhs = GermanStr::new(&rhs).unwrap();
         assert_eq!(lhs == rhs, german_lhs == german_rhs);
+    }
+
+    #[test]
+    fn clone(val: String) {
+        let german = GermanStr::new(&val);
+        assert_eq!(german, german.clone());
     }
 }
