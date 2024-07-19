@@ -130,7 +130,8 @@ impl GermanStr {
                 let ptr = if self.ptr.is_null() {
                     NonNull::dangling().as_ptr()
                 } else {
-                    self.ptr
+                    let ptr_addr = &self.ptr as *const *const u8;
+                    std::mem::transmute(ptr_addr)
                 };
                 std::slice::from_raw_parts(ptr, suffix_len)
             }
