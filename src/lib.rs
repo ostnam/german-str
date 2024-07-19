@@ -89,12 +89,8 @@ impl GermanStr {
             return Some(GermanStr::new_inline(src));
         }
 
-        let mut buf = [0; 4];
-        for i in 0..src.len().min(4) {
-            buf[i] = src.as_bytes()[i];
-        }
-        let prefix = unsafe { std::mem::transmute(buf) };
-        let layout  = std::alloc::Layout::array::<u8>(src.len()).ok()?;
+        let prefix = str_prefix::<&str>(&src);
+        let layout = std::alloc::Layout::array::<u8>(src.len()).ok()?;
         let ptr = unsafe { std::alloc::alloc(layout) };
         if ptr.is_null() {
             handle_alloc_error(layout);
