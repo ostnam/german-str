@@ -269,7 +269,8 @@ impl PartialEq<String> for GermanStr {
 impl PartialEq<GermanStr> for String {
     #[inline(always)]
     fn eq(&self, other: &GermanStr) -> bool {
-        other == self
+        other.prefix == str_prefix::<&String>(self)
+            && other.suffix() == str_suffix::<&String>(self)
     }
 }
 
@@ -412,5 +413,22 @@ impl std::fmt::Debug for GermanStr {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         std::fmt::Debug::fmt(self.as_str(), f)
+    }
+}
+
+#[inline(always)]
+pub fn str_suffix<T>(src: &impl AsRef<str>) -> &[u8] {
+    src.as_ref().as_bytes().get(4..).unwrap_or_default()
+}
+
+#[inline(always)]
+pub fn str_prefix<T>(src: impl AsRef<str>) -> u32 {
+    let src = src.as_ref().as_bytes();
+    let mut bytes = [0; 4];
+    for i in 0..src.len().min(4) {
+        bytes[i] = src[i];
+    }
+    unsafe {
+        std::mem::transmute(bytes)
     }
 }
