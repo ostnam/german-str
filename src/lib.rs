@@ -6,7 +6,11 @@ use std::ops::Deref;
 use std::ptr::{null, NonNull};
 use std::str::FromStr;
 
-pub const MAX_INLINE_CHARS: usize = 12;
+/// The maximum number of chars a GermanStr can contain before requiring a heap allocation.
+pub const MAX_INLINE_BYTES: usize = 12;
+
+/// The absolute maximum number of chars a GermanStr can hold.
+/// Since the len is an u32, it is 2^32.
 pub const MAX_LEN: usize = 2_usize.pow(32);
 
 #[repr(C)]
@@ -28,7 +32,7 @@ unsafe impl Sync for GermanStr {}
 impl Drop for GermanStr {
     #[inline]
     fn drop(&mut self) {
-        if self.len as usize > MAX_INLINE_CHARS {
+        if self.len as usize > MAX_INLINE_BYTES {
             let ptr = self.ptr.cast_mut();
             unsafe {
                 // Safety: this call can only fail if self.len is too long.
@@ -38,7 +42,7 @@ impl Drop for GermanStr {
                 std::alloc::dealloc(ptr, layout);
             }
         }
-        // In the case where len <= MAX_INLINE_CHARS, no heap data is owned and
+        // In the case where len <= MAX_INLINE_BYTES, no heap data is owned and
         // no deallocation is needed.
     }
 }
@@ -46,10 +50,10 @@ impl Drop for GermanStr {
 impl Clone for GermanStr {
     #[inline]
     fn clone(&self) -> Self {
-        if self.len as usize <= MAX_INLINE_CHARS {
             let mut res = GermanStr::default();
             unsafe {
                 std::ptr::copy_nonoverlapping(self, &mut res, 1);
+        if self.len as usize <= MAX_INLINE_BYTES {
             }
             res
         } else {
@@ -68,7 +72,7 @@ impl GermanStr {
         if src.len() > MAX_LEN {
             return None;
         }
-        if src.len() <= MAX_INLINE_CHARS {
+        if src.len() <= MAX_INLINE_BYTES {
             return Some(GermanStr::new_inline(src));
         }
         let prefix = unsafe {
@@ -97,7 +101,7 @@ impl GermanStr {
 
     #[inline]
     pub const fn new_inline(src: &str) -> GermanStr {
-        assert!(src.len() <= MAX_INLINE_CHARS);
+        assert!(src.len() <= MAX_INLINE_BYTES);
         let res = GermanStr {
             len: src.len() as u32,
             prefix: 0,
@@ -127,7 +131,7 @@ impl GermanStr {
     #[inline]
     pub fn suffix(&self) -> &[u8] {
         let suffix_len = self.len().saturating_sub(4) as usize;
-        if self.len() <= MAX_INLINE_CHARS {
+        if self.len() <= MAX_INLINE_BYTES {
             unsafe {
                 let ptr = if self.ptr.is_null() {
                     NonNull::dangling().as_ptr()
@@ -166,7 +170,7 @@ impl GermanStr {
 
     #[inline(always)]
     pub const fn is_heap_allocated(&self) -> bool {
-        self.len as usize > MAX_INLINE_CHARS
+        self.len as usize > MAX_INLINE_BYTES
     }
 }
 
@@ -176,7 +180,7 @@ impl Deref for GermanStr {
     #[inline(always)]
     fn deref(&self) -> &str {
         let len = self.len as usize;
-        if len <= MAX_INLINE_CHARS {
+        if len <= MAX_INLINE_BYTES {
             let prefix_addr: *const u32 = &self.prefix;
             unsafe {
                 let ptr = std::mem::transmute(prefix_addr);
@@ -217,7 +221,6 @@ impl Ord for GermanStr {
 
 
 impl Eq for GermanStr {}
-
 
 impl PartialEq<str> for GermanStr {
     #[inline(always)]
