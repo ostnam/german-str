@@ -77,10 +77,7 @@ impl Clone for GermanStr {
 
 impl GermanStr {
     #[inline]
-    pub fn new<T>(src: T) -> Option<Self>
-    where
-        T: AsRef<str>,
-    {
+    pub fn new(src: impl AsRef<str>) -> Option<Self> {
         let src = src.as_ref();
         if src.len() > MAX_LEN {
             return None;
