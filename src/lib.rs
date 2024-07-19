@@ -89,17 +89,19 @@ impl GermanStr {
             return Some(GermanStr::new_inline(src));
         }
 
-        let prefix = str_prefix::<&str>(&src);
         let layout = std::alloc::Layout::array::<u8>(src.len()).ok()?;
-        let ptr = unsafe { std::alloc::alloc(layout) };
+        let ptr = unsafe {
+            std::alloc::alloc(layout)
+        };
         if ptr.is_null() {
             handle_alloc_error(layout);
         }
-        let slice = unsafe { std::slice::from_raw_parts_mut(ptr, src.len()) };
-        slice.clone_from_slice(src.as_bytes());
+        unsafe {
+            std::ptr::copy_nonoverlapping(src.as_bytes().as_ptr(), ptr, src.len());
+        }
         Some(GermanStr {
             len: src.len() as u32,
-            prefix,
+            prefix: str_prefix::<&str>(&src),
             ptr,
         })
     }
