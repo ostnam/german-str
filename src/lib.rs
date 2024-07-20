@@ -20,6 +20,12 @@ pub const MAX_INLINE_BYTES: usize = 12;
 /// Since the len is an u32, it is 2^32.
 pub const MAX_LEN: usize = 2_usize.pow(32);
 
+/// A string type with the following properties:
+///
+/// * Immutable.
+/// * `size_of::<GermanStr>() == 16`
+/// * Strings of 12 or less bytes are entirely located on the stack.
+/// * Fast comparisons.
 #[repr(C)]
 pub struct GermanStr {
     /// Number of chars of the string.
@@ -53,6 +59,7 @@ union Last8 {
 }
 
 #[derive(Debug, Clone, Copy)]
+/// Represents the reasons why creating a new `GermanStr` could fail.
 pub enum InitError {
     /// `GermanStr`s use an u32 to store their length, hence they can't contain
     /// more than 2^32 bytes (~4GB).
@@ -497,7 +504,7 @@ pub fn str_prefix<T>(src: impl AsRef<str>) -> [u8; 4] {
 }
 
 #[inline]
-/// Returns a slice to every byte of the string, skipping the first 4.
+/// Returns a slice to every byte of a string, skipping the first 4.
 pub fn str_suffix<T>(src: &impl AsRef<str>) -> &[u8] {
     src.as_ref().as_bytes().get(4..).unwrap_or_default()
 }
