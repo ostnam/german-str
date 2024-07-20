@@ -1,9 +1,16 @@
+#![no_std]
 #![cfg(target_pointer_width = "64")]
 
-use std::alloc::{handle_alloc_error, Layout};
-use std::borrow::{Borrow, Cow};
-use std::ops::Deref;
-use std::str::FromStr;
+extern crate alloc;
+
+use alloc::borrow::{Cow, ToOwned as _};
+use alloc::slice;
+use alloc::string::String;
+use core::alloc::Layout;
+use core::borrow::Borrow;
+use core::ops::Deref;
+use core::{cmp, ptr};
+use core::str::FromStr;
 
 /// The maximum number of chars a GermanStr can contain before requiring a heap
 /// allocation.
@@ -68,10 +75,10 @@ impl GermanStr {
             .map_err(|_| InitError::TooLong)?;
         let ptr = unsafe {
             // Safety: layout is not zero-sized (src.len() <= MAX_INLINE_BYTES guard).
-            std::alloc::alloc(layout)
+            alloc::alloc::alloc(layout)
         };
         if ptr.is_null() {
-            handle_alloc_error(layout);
+            alloc::alloc::handle_alloc_error(layout);
         }
         unsafe {
             // Safety:
@@ -80,7 +87,7 @@ impl GermanStr {
             //      for src.len() bytes.
             //   3. *_ u8 is always aligned.
             //   4. The 2 regions can't overlap since they belong to different objects.
-            std::ptr::copy_nonoverlapping(src.as_bytes().as_ptr(), ptr, src.len());
+            ptr::copy_nonoverlapping(src.as_bytes().as_ptr(), ptr, src.len());
         }
         Ok(GermanStr {
             len: src.len() as u32,
@@ -164,7 +171,7 @@ impl GermanStr {
                 // 3. ptr has the correct offset for the length
                 // 4. Heap values are properly initialized.
                 // 5. Values in the slice are never mutated.
-                std::slice::from_raw_parts(ptr.add(4), suffix_len)
+                slice::from_raw_parts(ptr.add(4), suffix_len)
             }
         } else {
             unsafe {
@@ -209,18 +216,18 @@ impl Clone for GermanStr {
                 let layout = Layout::array::<u8>(self.len()).unwrap_unchecked();
 
                 // Safety: layout is not zero-sized, otherwise we would store the string inplace.
-                let ptr = std::alloc::alloc(layout);
+                let ptr = alloc::alloc::alloc(layout);
                 (ptr, layout)
             };
             if ptr.is_null() {
-                handle_alloc_error(layout);
+                alloc::alloc::handle_alloc_error(layout);
             }
             unsafe {
                 // Safety:
                 //   1. Both pointers are valid.
                 //   2. *_ u8 is always aligned.
                 //   3. The 2 regions can't overlap since they belong to different objects.
-                std::ptr::copy_nonoverlapping(self_ptr, ptr, self.len());
+                ptr::copy_nonoverlapping(self_ptr, ptr, self.len());
             }
             GermanStr {
                 prefix: self.prefix,
@@ -247,7 +254,7 @@ impl Drop for GermanStr {
                 // We can only create a long `GermanStr` using GermanStr::new: if `self.len`
                 // was too long, we'd get an error when we try to create the GermanStr.
                 let layout = Layout::array::<u8>(self.len as usize).unwrap_unchecked();
-                std::alloc::dealloc(ptr, layout);
+                alloc::alloc::dealloc(ptr, layout);
             }
         }
         // In the case where len <= MAX_INLINE_BYTES, no heap data is owned and
@@ -273,14 +280,14 @@ impl Deref for GermanStr {
         if len <= MAX_INLINE_BYTES {
             let prefix_ptr: *const [u8; 4] = &self.prefix;
             unsafe {
-                let slice = std::slice::from_raw_parts(prefix_ptr.cast(), len);
-                std::str::from_utf8_unchecked(slice)
+                let slice = slice::from_raw_parts(prefix_ptr.cast(), len);
+                core::str::from_utf8_unchecked(slice)
             }
         } else {
             unsafe {
                 let ptr = self.last8.ptr;
-                let slice = std::slice::from_raw_parts(ptr, len);
-                std::str::from_utf8_unchecked(slice)
+                let slice = slice::from_raw_parts(ptr, len);
+                core::str::from_utf8_unchecked(slice)
             }
         }
     }
@@ -296,7 +303,7 @@ impl Eq for GermanStr {}
 
 impl Ord for GermanStr {
     #[inline]
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
         self.prefix.cmp(&other.prefix)
             .then_with(
                 || self.suffix_bytes_slice().cmp(other.suffix_bytes_slice())
@@ -331,24 +338,24 @@ impl Borrow<str> for GermanStr {
     }
 }
 
-impl std::fmt::Debug for GermanStr {
+impl core::fmt::Debug for GermanStr {
     #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        std::fmt::Debug::fmt(self.as_str(), f)
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        core::fmt::Debug::fmt(self.as_str(), f)
     }
 }
 
 
-impl std::fmt::Display for GermanStr {
+impl core::fmt::Display for GermanStr {
     #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        std::fmt::Display::fmt(self.as_str(), f)
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        core::fmt::Display::fmt(self.as_str(), f)
     }
 }
 
-impl std::hash::Hash for GermanStr {
+impl core::hash::Hash for GermanStr {
     #[inline(always)]
-    fn hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
+    fn hash<H: core::hash::Hasher>(&self, hasher: &mut H) {
         self.as_str().hash(hasher);
     }
 }
@@ -356,7 +363,7 @@ impl std::hash::Hash for GermanStr {
 
 impl PartialOrd for GermanStr {
     #[inline(always)]
-    fn partial_cmp(&self, other: &GermanStr) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &GermanStr) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
