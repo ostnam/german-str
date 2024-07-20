@@ -1,10 +1,9 @@
 use std::ops::Deref;
 
-use german_str::GermanStr;
+use german_str::{GermanStr, MAX_LEN};
 use proptest::proptest;
 
 #[test]
-#[cfg(target_pointer_width = "64")]
 fn is_2_bytes() {
     assert_eq!(std::mem::size_of::<GermanStr>(), 16)
 }
@@ -13,6 +12,11 @@ fn is_2_bytes() {
 fn assert_traits() {
     fn f<T: Send + Sync + ::std::fmt::Debug + Clone>() {}
     f::<GermanStr>();
+}
+
+#[test]
+fn assert_largest_layout_valid() {
+    assert!(std::alloc::Layout::array::<u8>(MAX_LEN).is_ok());
 }
 
 #[test]
@@ -64,7 +68,7 @@ proptest! {
 
     #[test]
     fn clone(val: String) {
-        let german = GermanStr::new(&val);
+        let german = GermanStr::new(&val).unwrap();
         assert_eq!(german, german.clone());
     }
 }
