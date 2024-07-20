@@ -140,6 +140,16 @@ impl GermanStr {
         &self.prefix[..prefix_len]
     }
 
+    #[inline(always)]
+    /// Returns an array containing the first 4 bytes of a `GermanStr`.
+    /// If the string is shorter than 4 bytes, extra bytes are set to 0.
+    /// Can be used for comparisons and ordering as is.
+    /// Since an UTF-8 char can consist of 1-4 bytes, this array can represent
+    /// anywhere from 1 to 4 chars, and potentially only part of the last char.
+    pub const fn prefix_bytes_array(&self) -> [u8; 4] {
+        self.prefix
+    }
+
     #[inline]
     /// Returns a slice containing every byte of a `GermanStr`, except the first 4.
     pub fn suffix_bytes_slice(&self) -> &[u8] {
