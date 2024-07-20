@@ -119,17 +119,6 @@ impl Clone for GermanStr {
 }
 
 impl GermanStr {
-    #[inline(always)]
-    pub fn get_heap_ptr(&self) -> Option<*const u8> {
-        if self.len as usize > MAX_INLINE_BYTES {
-            Some(unsafe {
-                self.last8.ptr
-            })
-        } else {
-            None
-        }
-    }
-
     #[inline]
     /// Main function to create a GermanStr.
     pub fn new(src: impl AsRef<str>) -> Result<Self, InitError> {
@@ -177,15 +166,13 @@ impl GermanStr {
     /// Panics if `src.len()` > `MAX_INLINE_BYTES`.
     pub const fn new_inline(src: &str) -> GermanStr {
         assert!(src.len() <= MAX_INLINE_BYTES);
-        let mut prefix_buf = [0; 4];
+
+        let mut prefix = [0; 4];
         let mut i = 0;
         while i < src.len() && i < 4 {
-            prefix_buf[i] = src.as_bytes()[i];
+            prefix[i] = src.as_bytes()[i];
             i += 1;
         }
-        let prefix = unsafe {
-            std::mem::transmute(prefix_buf)
-        };
 
         let mut buf = [0; 8];
         let mut i = 4;
@@ -202,16 +189,30 @@ impl GermanStr {
     }
 
     #[inline]
-    pub fn prefix(&self) -> &[u8] {
-        let prefix_len = self.len().min(4) as usize;
-        let prefix_addr: *const [u8; 4] = &self.prefix;
-        unsafe {
-            std::slice::from_raw_parts(prefix_addr.cast(), prefix_len)
+    fn get_heap_ptr(&self) -> Option<*const u8> {
+        if self.len as usize > MAX_INLINE_BYTES {
+            Some(unsafe {
+                self.last8.ptr
+            })
+        } else {
+            None
         }
     }
 
     #[inline]
-    pub fn suffix(&self) -> &[u8] {
+    /// Returns a slice containing the first 4 bytes of a `GermanStr`.
+    /// Can be used for comparisons and ordering as is.
+    /// Since an UTF-8 char can consist of 1-4 bytes, this slice can represent
+    /// anywhere from 1 to 4 chars, and potentially only part of the last char.
+    pub fn prefix_bytes_slice(&self) -> &[u8] {
+        let prefix_len = self.len().min(4);
+        &self.prefix[..prefix_len]
+    }
+
+    #[inline]
+    /// Returns a slice containing every byte of a `GermanStr`, except the
+    /// first 4.
+    pub fn suffix_bytes_slice(&self) -> &[u8] {
         let suffix_len = self.len().saturating_sub(4) as usize;
         if self.len as usize > MAX_INLINE_BYTES {
             unsafe {
@@ -219,9 +220,8 @@ impl GermanStr {
                 std::slice::from_raw_parts(ptr.add(4), suffix_len)
             }
         } else {
-            let buf_ptr: *const Last8 = &self.last8;
             unsafe {
-                std::slice::from_raw_parts(buf_ptr.cast(), suffix_len)
+                &self.last8.buf[0..suffix_len]
             }
         }
     }
@@ -277,7 +277,7 @@ impl Deref for GermanStr {
 impl PartialEq<GermanStr> for GermanStr {
     #[inline(always)]
     fn eq(&self, other: &GermanStr) -> bool {
-        self.prefix == other.prefix && self.suffix() == other.suffix()
+        self.prefix == other.prefix && self.suffix_bytes_slice() == other.suffix_bytes_slice()
     }
 }
 
@@ -285,7 +285,9 @@ impl Ord for GermanStr {
     #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.prefix.cmp(&other.prefix)
-            .then_with(|| self.suffix().cmp(other.suffix()))
+            .then_with(
+                || self.suffix_bytes_slice().cmp(other.suffix_bytes_slice())
+            )
     }
 }
 
@@ -323,7 +325,7 @@ impl<'a> PartialEq<GermanStr> for &'a str {
 impl PartialEq<String> for GermanStr {
     #[inline(always)]
     fn eq(&self, other: &String) -> bool {
-        self.as_str() == other
+        other == self
     }
 }
 
@@ -331,7 +333,7 @@ impl PartialEq<GermanStr> for String {
     #[inline(always)]
     fn eq(&self, other: &GermanStr) -> bool {
         other.prefix == str_prefix::<&String>(self)
-            && other.suffix() == str_suffix::<&String>(self)
+            && other.suffix_bytes_slice() == str_suffix::<&String>(self)
     }
 }
 
