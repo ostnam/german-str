@@ -1,9 +1,9 @@
 #![cfg(target_pointer_width = "64")]
 
-use std::alloc::handle_alloc_error;
+use std::alloc::{handle_alloc_error, Layout};
 use std::borrow::{Borrow, Cow};
 use std::ops::Deref;
-use std::ptr::{null, NonNull};
+use std::ptr::null;
 use std::str::FromStr;
 
 /// The maximum number of chars a GermanStr can contain before requiring a heap allocation.
@@ -16,21 +16,39 @@ pub const MAX_LEN: usize = 2_usize.pow(32);
 #[repr(C)]
 pub struct GermanStr {
     /// Number of chars of the string.
+    /// Serves as a tag for the variant used by the `last8` field, based on
+    /// whether it is longer than `MAX_INLINE_BYTES` or not.
     len: u32,
 
-    /// The first 4 bytes of the string.
-    /// If the string has less than 4 bytes, the extra bytes are set to 0.
-    /// Since an UTF-8 char can consist of 1-4 bytes, it cannot be interpreted
-    /// as chars.
-    /// This prefix can still be used to speed up comparisons because UTF-8 strings
-    /// are sorted byte-wise.
-    prefix: u32,
+    /// The first 4 bytes of the string. If it is shorter than 4 bytes, extra
+    /// bytes are set to 0.
+    ///
+    /// Since an UTF-8 char can consist of 1-4 bytes, this field can store
+    /// 1-4 chars, and potentially only part of the last char.
+    /// In every case, this array can still be used to speed up comparisons
+    /// because UTF-8 strings are ordered byte-wise.
+    prefix: [u8; 4],
 
     /// If the string is longer than 12 bytes, is an owning, unique pointer to the
     /// chars on the heap.
     /// Otherwise, is an `[u8; 8]`, with extra bytes set to 0.
     /// The prefix is also included on the heap.
+    last8: Last8,
+}
+
+#[derive(Copy, Clone)]
+/// Holds the last 8 bytes of a `GermanStr`.
+union Last8 {
     ptr: *const u8,
+
+    /// If the string is shorter than 12 bytes, extra bytes are set to 0.
+    buf: [u8; 8],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum InitError {
+    /// `GermanStr`s use an u32 to store their length, hence they can't contain more than 2^32 bytes (~4GB).
+    TooLong,
 }
 
 // Safety: According to the rustonomicon, "something can safely be Send unless it shares mutable
@@ -45,13 +63,13 @@ unsafe impl Sync for GermanStr {}
 impl Drop for GermanStr {
     #[inline]
     fn drop(&mut self) {
-        if self.len as usize > MAX_INLINE_BYTES {
-            let ptr = self.ptr.cast_mut();
+        if let Some(ptr) = self.get_heap_ptr() {
+            let ptr = ptr.cast_mut();
             unsafe {
                 // Safety: this call can only fail if self.len is too long.
                 // We can only create a long `GermanStr` using GermanStr::new: if `self.len`
                 // was too long, we'd get an error when we try to create the GermanStr.
-                let layout = std::alloc::Layout::array::<u8>(self.len as usize).unwrap_unchecked();
+                let layout = Layout::array::<u8>(self.len as usize).unwrap_unchecked();
                 std::alloc::dealloc(ptr, layout);
             }
         }
@@ -63,91 +81,147 @@ impl Drop for GermanStr {
 impl Clone for GermanStr {
     #[inline]
     fn clone(&self) -> Self {
-        if self.len as usize <= MAX_INLINE_BYTES {
+        if let Some(self_ptr) = self.get_heap_ptr() {
+            let mut new = GermanStr {
+                prefix: self.prefix,
+                len: self.len,
+                last8: Last8 { ptr: null() },
+            };
+            let (ptr, layout) = unsafe {
+                // Safety: If len was too high for a valid layout, we couldn't
+                // have made self in the first place.
+                let layout = Layout::array::<u8>(self.len()).unwrap_unchecked();
+
+                // Safety: layout is not zero-sized, otherwise we would store the string inplace.
+                let ptr = std::alloc::alloc(layout);
+                (ptr, layout)
+            };
+            if ptr.is_null() {
+                handle_alloc_error(layout);
+            }
+            unsafe {
+                // Safety:
+                //   1. Both pointers are valid.
+                //   2. *_ u8 is always aligned.
+                //   3. The 2 regions can't overlap since they belong to different objects.
+                std::ptr::copy_nonoverlapping(self_ptr, ptr, self.len());
+            }
+            new.last8 = Last8 { ptr };
+            new
+        } else {
             GermanStr {
                 len: self.len,
                 prefix: self.prefix,
-                ptr: self.ptr,
+                last8: self.last8,
             }
-        } else {
-            GermanStr::new(self.as_str()).unwrap()
         }
     }
 }
 
 impl GermanStr {
+    #[inline(always)]
+    pub fn get_heap_ptr(&self) -> Option<*const u8> {
+        if self.len as usize > MAX_INLINE_BYTES {
+            Some(unsafe {
+                self.last8.ptr
+            })
+        } else {
+            None
+        }
+    }
+
     #[inline]
-    pub fn new(src: impl AsRef<str>) -> Option<Self> {
+    /// Main function to create a GermanStr.
+    pub fn new(src: impl AsRef<str>) -> Result<Self, InitError> {
         let src = src.as_ref();
         if src.len() > MAX_LEN {
-            return None;
+            return Err(InitError::TooLong);
         }
         if src.len() <= MAX_INLINE_BYTES {
-            return Some(GermanStr::new_inline(src));
+            return Ok(GermanStr::new_inline(src));
         }
 
-        let layout = std::alloc::Layout::array::<u8>(src.len()).ok()?;
+        let layout = Layout::array::<u8>(src.len())
+            .map_err(|_| InitError::TooLong)?;
         let ptr = unsafe {
+            // Safety: layout is not zero-sized (src.len() <= MAX_INLINE_BYTES guard).
             std::alloc::alloc(layout)
         };
         if ptr.is_null() {
             handle_alloc_error(layout);
         }
         unsafe {
-            std::ptr::copy_nonoverlapping(src.as_bytes().as_ptr(), ptr, src.len());
+                // Safety:
+                //   1. We assume src is a valid object.
+                //   2. ptr is valid: it was checked for null and allocated
+                //      for src.len() bytes.
+                //   3. *_ u8 is always aligned.
+                //   4. The 2 regions can't overlap since they belong to different objects.
+            std::ptr::copy_nonoverlapping(
+                src.as_bytes().as_ptr(),
+                ptr,
+                src.len(),
+            );
         }
-        Some(GermanStr {
+        Ok(GermanStr {
             len: src.len() as u32,
             prefix: str_prefix::<&str>(&src),
-            ptr,
+            last8: Last8 { ptr },
         })
     }
 
     #[inline]
+    /// Attempts to create a GermanStr entirely stored in the struct itself,
+    /// without heap allocations.
+    ///
+    /// Panics if `src.len()` > `MAX_INLINE_BYTES`.
     pub const fn new_inline(src: &str) -> GermanStr {
         assert!(src.len() <= MAX_INLINE_BYTES);
-        let res = GermanStr {
-            len: src.len() as u32,
-            prefix: 0,
-            ptr: null(),
+        let mut prefix_buf = [0; 4];
+        let mut i = 0;
+        while i < src.len() && i < 4 {
+            prefix_buf[i] = src.as_bytes()[i];
+            i += 1;
+        }
+        let prefix = unsafe {
+            std::mem::transmute(prefix_buf)
         };
-        unsafe {
-            let mut as_buf: [u8; 16] = std::mem::transmute(res);
-            let mut i = 0;
-            while i < src.len() {
-                as_buf[4 + i] = src.as_bytes()[i];
-                i += 1;
-            }
-            std::mem::transmute(as_buf)
+
+        let mut buf = [0; 8];
+        let mut i = 4;
+        while i < src.len() && i < MAX_INLINE_BYTES {
+            buf[i - 4] = src.as_bytes()[i];
+            i += 1;
+        }
+
+        GermanStr {
+            len: src.len() as u32,
+            prefix,
+            last8: Last8 { buf },
         }
     }
 
     #[inline]
     pub fn prefix(&self) -> &[u8] {
         let prefix_len = self.len().min(4) as usize;
-        let prefix_addr: *const u32 = &self.prefix;
+        let prefix_addr: *const [u8; 4] = &self.prefix;
         unsafe {
-            let ptr = std::mem::transmute(prefix_addr);
-            std::slice::from_raw_parts(ptr, prefix_len)
+            std::slice::from_raw_parts(prefix_addr.cast(), prefix_len)
         }
     }
 
     #[inline]
     pub fn suffix(&self) -> &[u8] {
         let suffix_len = self.len().saturating_sub(4) as usize;
-        if self.len() <= MAX_INLINE_BYTES {
+        if self.len as usize > MAX_INLINE_BYTES {
             unsafe {
-                let ptr = if self.ptr.is_null() {
-                    NonNull::dangling().as_ptr()
-                } else {
-                    let ptr_addr = &self.ptr as *const *const u8;
-                    std::mem::transmute(ptr_addr)
-                };
-                std::slice::from_raw_parts(ptr, suffix_len)
+                let ptr = self.last8.ptr;
+                std::slice::from_raw_parts(ptr.add(4), suffix_len)
             }
         } else {
+            let buf_ptr: *const Last8 = &self.last8;
             unsafe {
-                std::slice::from_raw_parts(self.ptr.add(4), suffix_len)
+                std::slice::from_raw_parts(buf_ptr.cast(), suffix_len)
             }
         }
     }
@@ -185,15 +259,15 @@ impl Deref for GermanStr {
     fn deref(&self) -> &str {
         let len = self.len as usize;
         if len <= MAX_INLINE_BYTES {
-            let prefix_addr: *const u32 = &self.prefix;
+            let prefix_ptr: *const [u8; 4] = &self.prefix;
             unsafe {
-                let ptr = std::mem::transmute(prefix_addr);
-                let slice = std::slice::from_raw_parts(ptr, len);
+                let slice = std::slice::from_raw_parts(prefix_ptr.cast(), len);
                 std::str::from_utf8_unchecked(slice)
             }
         } else {
             unsafe {
-                let slice = std::slice::from_raw_parts(self.ptr, len);
+                let ptr = self.last8.ptr;
+                let slice = std::slice::from_raw_parts(ptr, len);
                 std::str::from_utf8_unchecked(slice)
             }
         }
@@ -208,14 +282,6 @@ impl PartialEq<GermanStr> for GermanStr {
 }
 
 impl Ord for GermanStr {
-    #[cfg(target_endian = "little")]
-    #[inline]
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.prefix.swap_bytes().cmp(&other.prefix.swap_bytes())
-            .then_with(|| self.suffix().cmp(other.suffix()))
-    }
-
-    #[cfg(target_endian = "big")]
     #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.prefix.cmp(&other.prefix)
@@ -295,8 +361,8 @@ impl Default for GermanStr {
     fn default() -> GermanStr {
         GermanStr {
             len: 0,
-            prefix: 0,
-            ptr: null(),
+            prefix: [0; 4],
+            last8: Last8 { buf: [0; 8] },
         }
     }
 }
@@ -325,47 +391,47 @@ impl iter::FromIterator<char> for GermanStr {
 */
 
 impl TryFrom<&str> for GermanStr {
-    type Error = ();
+    type Error = InitError;
 
     #[inline]
-    fn try_from(s: &str) -> Result<GermanStr, ()> {
-        GermanStr::new(s).ok_or(())
+    fn try_from(s: &str) -> Result<GermanStr, InitError> {
+        GermanStr::new(s)
+        }
     }
-}
 
 impl TryFrom<&mut str> for GermanStr {
-    type Error = ();
+    type Error = InitError;
 
     #[inline]
-    fn try_from(s: &mut str) -> Result<GermanStr, ()> {
-        GermanStr::new(s).ok_or(())
+    fn try_from(s: &mut str) -> Result<GermanStr,InitError> {
+        GermanStr::new(s)
     }
 }
 
 impl TryFrom<&String> for GermanStr {
-    type Error = ();
+    type Error = InitError;
 
     #[inline]
-    fn try_from(s: &String) -> Result<GermanStr, ()> {
-        GermanStr::new(s).ok_or(())
+    fn try_from(s: &String) -> Result<GermanStr,InitError> {
+        GermanStr::new(s)
     }
 }
 
 impl TryFrom<String> for GermanStr {
-    type Error = ();
+    type Error = InitError;
 
     #[inline(always)]
-    fn try_from(text: String) -> Result<Self, ()> {
-        Self::new(text).ok_or(())
+    fn try_from(text: String) -> Result<Self, Self::Error> {
+        Self::new(text)
     }
 }
 
 impl<'a> TryFrom<Cow<'a, str>> for GermanStr {
-    type Error = ();
+    type Error = InitError;
 
     #[inline]
-    fn try_from(s: Cow<'a, str>) -> Result<GermanStr, ()> {
-        GermanStr::new(s).ok_or(())
+    fn try_from(s: Cow<'a, str>) -> Result<GermanStr,InitError> {
+        GermanStr::new(s)
     }
 }
 
@@ -396,11 +462,11 @@ impl Borrow<str> for GermanStr {
 }
 
 impl FromStr for GermanStr {
-    type Err = ();
+    type Err = InitError;
 
     #[inline]
     fn from_str(s: &str) -> Result<GermanStr, Self::Err> {
-        GermanStr::new(s).ok_or(())
+        GermanStr::new(s)
     }
 }
 
@@ -417,13 +483,11 @@ pub fn str_suffix<T>(src: &impl AsRef<str>) -> &[u8] {
 }
 
 #[inline(always)]
-pub fn str_prefix<T>(src: impl AsRef<str>) -> u32 {
+pub fn str_prefix<T>(src: impl AsRef<str>) -> [u8; 4] {
     let src = src.as_ref().as_bytes();
     let mut bytes = [0; 4];
     for i in 0..src.len().min(4) {
         bytes[i] = src[i];
     }
-    unsafe {
-        std::mem::transmute(bytes)
-    }
+    bytes
 }
