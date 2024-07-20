@@ -167,7 +167,7 @@ impl GermanStr {
     #[inline]
     /// Returns a slice containing every byte of a `GermanStr`, except the first 4.
     pub fn suffix_bytes_slice(&self) -> &[u8] {
-        let suffix_len = self.len().saturating_sub(4) as usize;
+        let suffix_len = self.len().saturating_sub(4);
         if self.len as usize > MAX_INLINE_BYTES {
             unsafe {
                 let ptr = self.last8.ptr;
@@ -192,6 +192,7 @@ impl GermanStr {
         Deref::deref(self)
     }
 
+    #[allow(clippy::inherent_to_string_shadow_display)]
     #[inline(always)]
     pub fn to_string(&self) -> String {
         self.as_str().to_owned()
@@ -495,11 +496,10 @@ impl From<GermanStr> for String {
 /// Returns the first 4 bytes of a string.
 /// If the string has less than 4 bytes, extra bytes are set to 0.
 pub fn str_prefix<T>(src: impl AsRef<str>) -> [u8; 4] {
-    let src = src.as_ref().as_bytes();
+    let src_bytes = src.as_ref().as_bytes();
+    let prefix_len = src_bytes.len().min(4);
     let mut bytes = [0; 4];
-    for i in 0..src.len().min(4) {
-        bytes[i] = src[i];
-    }
+    bytes[..prefix_len].copy_from_slice(&src_bytes[..prefix_len]);
     bytes
 }
 
