@@ -2,6 +2,9 @@
 name = "german-str"
 version = "0.1.0"
 edition = "2021"
+description = "small-string optimized string type with fast comparisons"
+license = "MIT"
+repository = "https://github.com/ostnam/german-str"
 
 [dependencies]
 
