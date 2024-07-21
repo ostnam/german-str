@@ -301,6 +301,13 @@ impl Deref for GermanStr {
     }
 }
 
+impl AsRef<str> for GermanStr {
+    #[inline(always)]
+    fn as_ref(&self) -> &str {
+        Deref::deref(self)
+    }
+}
+
 impl PartialEq<GermanStr> for GermanStr {
     #[inline(always)]
     fn eq(&self, other: &GermanStr) -> bool {
