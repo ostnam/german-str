@@ -4,8 +4,10 @@
 extern crate alloc;
 
 use alloc::borrow::{Cow, ToOwned as _};
+use alloc::boxed::Box;
 use alloc::slice;
 use alloc::string::String;
+use alloc::sync::Arc;
 use core::alloc::Layout;
 use core::borrow::Borrow;
 use core::ops::Deref;
@@ -492,6 +494,31 @@ impl TryFrom<String> for GermanStr {
     #[inline(always)]
     fn try_from(text: String) -> Result<Self, Self::Error> {
         Self::new(text)
+    }
+}
+
+impl TryFrom<Box<str>> for GermanStr {
+    type Error = InitError;
+
+    #[inline(always)]
+    fn try_from(s: Box<str>) -> Result<GermanStr, Self::Error> {
+        GermanStr::new(s)
+    }
+}
+
+impl TryFrom<Arc<str>> for GermanStr {
+    type Error = InitError;
+
+    #[inline(always)]
+    fn try_from(s: Arc<str>) -> Result<GermanStr, Self::Error> {
+        GermanStr::new(s)
+    }
+}
+
+impl From<GermanStr> for Arc<str> {
+    #[inline(always)]
+    fn from(text: GermanStr) -> Self {
+        text.as_str().into()
     }
 }
 
