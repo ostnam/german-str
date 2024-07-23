@@ -368,6 +368,18 @@ impl core::fmt::Display for GermanStr {
     }
 }
 
+impl core::fmt::Display for InitError {
+    #[inline]
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        core::fmt::Display::fmt(
+            match self {
+                InitError::TooLong => "Tried to initialize a GermanStr longer than 4GB.",
+            },
+            f
+        )
+    }
+}
+
 impl core::hash::Hash for GermanStr {
     #[inline(always)]
     fn hash<H: core::hash::Hasher>(&self, hasher: &mut H) {
@@ -514,4 +526,104 @@ pub fn str_prefix<T>(src: impl AsRef<str>) -> [u8; 4] {
 /// Returns a slice to every byte of a string, skipping the first 4.
 pub fn str_suffix<T>(src: &impl AsRef<str>) -> &[u8] {
     src.as_ref().as_bytes().get(4..).unwrap_or_default()
+}
+
+#[cfg(feature = "serde")]
+mod serde {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+    use core::fmt;
+
+    use serde::de::{Deserializer, Error, Unexpected, Visitor};
+
+    use crate::GermanStr;
+
+    fn deserialize<'de: 'a, 'a, D>(deserializer: D) -> Result<GermanStr, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct GermanStrVisitor;
+
+        impl<'a> Visitor<'a> for GermanStrVisitor {
+            type Value = GermanStr;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a string")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                GermanStr::new(v).map_err(Error::custom)
+            }
+
+            fn visit_borrowed_str<E>(self, v: &'a str) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                GermanStr::new(v).map_err(Error::custom)
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                GermanStr::new(v).map_err(Error::custom)
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                match core::str::from_utf8(v) {
+                    Ok(s) => GermanStr::new(s).map_err(Error::custom),
+                    Err(_) => Err(Error::invalid_value(Unexpected::Bytes(v), &self)),
+                }
+            }
+
+            fn visit_borrowed_bytes<E>(self, v: &'a [u8]) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                match core::str::from_utf8(v) {
+                    Ok(s) => GermanStr::new(s).map_err(Error::custom),
+                    Err(_) => Err(Error::invalid_value(Unexpected::Bytes(v), &self)),
+                }
+            }
+
+            fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                match String::from_utf8(v) {
+                    Ok(s) => GermanStr::new(s).map_err(Error::custom),
+                    Err(e) => Err(Error::invalid_value(
+                        Unexpected::Bytes(&e.into_bytes()),
+                        &self,
+                    )),
+                }
+            }
+        }
+
+        deserializer.deserialize_str(GermanStrVisitor)
+    }
+
+    impl serde::Serialize for GermanStr {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            self.as_str().serialize(serializer)
+        }
+    }
+
+    impl<'de> serde::Deserialize<'de> for GermanStr {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserialize(deserializer)
+        }
+    }
 }
