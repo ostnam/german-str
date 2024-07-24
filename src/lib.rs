@@ -555,6 +555,18 @@ pub fn str_suffix<T>(src: &impl AsRef<str>) -> &[u8] {
     src.as_ref().as_bytes().get(4..).unwrap_or_default()
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for GermanStr {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> Result<Self, arbitrary::Error> {
+        let s = <&str>::arbitrary(u)?;
+        Ok(GermanStr::new(s).expect("BUG in arbitrary implementation of GermanStr. Please report it at github.com/ostnam/german-str/issues"))
+    }
+
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (0, Some(MAX_LEN))
+    }
+}
+
 #[cfg(feature = "serde")]
 mod serde {
     use alloc::string::String;
