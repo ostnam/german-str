@@ -11,7 +11,7 @@ use alloc::sync::Arc;
 use core::alloc::Layout;
 use core::borrow::Borrow;
 use core::ops::Deref;
-use core::{cmp, ptr};
+use core::{cmp, fmt, ptr};
 use core::str::FromStr;
 
 /// The maximum number of chars a GermanStr can contain before requiring a heap
@@ -558,6 +558,106 @@ pub fn str_suffix<T>(src: &impl AsRef<str>) -> &[u8] {
 /// Almost identical to [`ToString`], but converts to `GermanStr` instead.
 pub trait ToGermanStr {
     fn to_german_str(&self) -> GermanStr;
+}
+
+#[doc(hidden)]
+pub struct Writer {
+    len: usize,
+    inline: [u8; MAX_INLINE_BYTES],
+    heap: String,
+}
+
+impl Writer {
+    #[must_use]
+    pub const fn new() -> Self {
+        Writer {
+            len: 0,
+            inline: [0; MAX_INLINE_BYTES],
+            heap: String::new(),
+        }
+    }
+
+    fn push_str(&mut self, s: &str) -> Result<(), InitError> {
+        let old_len = self.len;
+        self.len += s.len();
+        if self.len > MAX_LEN {
+            return Err(InitError::TooLong);
+        }
+        if self.len <= MAX_INLINE_BYTES {
+            // we are still inline after the write
+            self.inline[old_len..self.len].copy_from_slice(s.as_bytes());
+        } else if old_len <= MAX_INLINE_BYTES {
+            // we need to switch from inline to heap
+            self.heap.reserve(self.len);
+            unsafe {
+                // SAFETY: inline data is guaranteed to be valid utf8 for previously
+                // written bytes since this is the only &mut method and we write an
+                // entire &str at each call, which is valid UTF8 bytes.
+                self.heap
+                    .as_mut_vec()
+                    .extend_from_slice(&self.inline[..old_len]);
+            }
+            self.heap.push_str(s);
+        } else {
+            self.heap.push_str(s);
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Write for Writer {
+    #[inline]
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.push_str(s)
+            .map_err(|_| fmt::Error::default())
+    }
+}
+
+/// Formats arguments to a [`GermanStr`], potentially without allocating.
+///
+/// See [`alloc::format!`] or [`format_args!`] for syntax documentation.
+#[macro_export]
+macro_rules! format_german_str {
+    ($($tt:tt)*) => {{
+        use ::core::fmt::Write;
+        let mut w = $crate::Writer::new();
+        w.write_fmt(format_args!($($tt)*))
+            .expect("tried to format_german_str a GermanStr bigger than the maximum GermanStr size");
+        $crate::GermanStr::from(w)
+    }};
+}
+
+impl From<Writer> for GermanStr {
+    fn from(value: Writer) -> Self {
+        if value.len <= MAX_INLINE_BYTES {
+            let mut prefix = [0; 4];
+            prefix.clone_from_slice(&value.inline[0..4]);
+            let mut last8 = [0; 8];
+            last8.clone_from_slice(&value.inline[4..MAX_INLINE_BYTES]);
+            GermanStr {
+                len: value.len as u32,
+                prefix,
+                last8: Last8 { buf: last8 },
+            }
+        } else {
+            let heap_ref = value.heap.leak(); // avoid copying the str
+            let ptr = heap_ref.as_ptr();
+            GermanStr {
+                len: value.len as u32,
+                prefix: str_prefix::<&str>(heap_ref),
+                last8: Last8 { ptr },
+            }
+        }
+    }
+}
+
+impl<T> ToGermanStr for T
+where
+    T: fmt::Display + ?Sized,
+{
+    fn to_german_str(&self) -> GermanStr {
+        format_german_str!("{}", self)
+    }
 }
 
 #[cfg(feature = "arbitrary")]
