@@ -555,6 +555,11 @@ pub fn str_suffix<T>(src: &impl AsRef<str>) -> &[u8] {
     src.as_ref().as_bytes().get(4..).unwrap_or_default()
 }
 
+/// Almost identical to [`ToString`], but converts to `GermanStr` instead.
+pub trait ToGermanStr {
+    fn to_german_str(&self) -> GermanStr;
+}
+
 #[cfg(feature = "arbitrary")]
 impl<'a> arbitrary::Arbitrary<'a> for GermanStr {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> Result<Self, arbitrary::Error> {
