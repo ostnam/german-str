@@ -8,10 +8,10 @@ use alloc::boxed::Box;
 use alloc::slice;
 use alloc::string::String;
 use alloc::sync::Arc;
+use core::{cmp, fmt, ptr};
 use core::alloc::Layout;
 use core::borrow::Borrow;
 use core::ops::Deref;
-use core::{cmp, fmt, ptr};
 use core::str::FromStr;
 
 /// The maximum number of chars a GermanStr can contain before requiring a heap

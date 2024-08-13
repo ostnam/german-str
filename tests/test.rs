@@ -1,11 +1,13 @@
-use std::ops::Deref;
+use std::{fmt::Write, ops::Deref};
 
-use german_str::{GermanStr, MAX_LEN};
+use assert_panic::assert_panic;
 use proptest::proptest;
+
+use german_str::{str_prefix, str_suffix, GermanStr, MAX_INLINE_BYTES, MAX_LEN};
 
 #[test]
 fn is_2_bytes() {
-    assert_eq!(std::mem::size_of::<GermanStr>(), 16)
+    assert_eq!(std::mem::size_of::<GermanStr>(), 16);
 }
 
 #[test]
@@ -36,6 +38,14 @@ fn test_equality() {
     let a = GermanStr::new("aaaa").unwrap();
     let b = GermanStr::new("aaaab").unwrap();
     assert_ne!(a, b);
+}
+
+#[test]
+fn test_default() {
+    assert_eq!(
+        GermanStr::default(),
+        String::default(),
+    );
 }
 
 proptest! {
@@ -70,5 +80,132 @@ proptest! {
     fn clone(val: String) {
         let german = GermanStr::new(&val).unwrap();
         assert_eq!(german, german.clone());
+    }
+
+    #[test]
+    fn new_inline(val: String) {
+        if val.len() > MAX_INLINE_BYTES {
+            assert_panic!({
+                GermanStr::new_inline(&val);
+            });
+        } else {
+            let inline = GermanStr::new_inline(&val);
+            assert_eq!(inline, val);
+        }
+    }
+
+    #[test]
+    fn prefix_bytes_slice(val: String) {
+        let german = GermanStr::new(&val).unwrap();
+        let prefix_len = val.len().min(4);
+        assert_eq!(
+            german.prefix_bytes_slice(),
+            &val.as_bytes()[..prefix_len],
+        );
+    }
+
+    #[test]
+    fn prefix_bytes_array(val: String) {
+        let german = GermanStr::new(&val).unwrap();
+        let prefix_len = val.len().min(4);
+        let mut og_array = [0; 4];
+        og_array[..prefix_len].copy_from_slice(&val.as_bytes()[..prefix_len]);
+        assert_eq!(
+            german.prefix_bytes_array(),
+            og_array,
+        );
+    }
+
+    #[test]
+    fn suffix_bytes_slice(val: String) {
+        let german = GermanStr::new(&val).unwrap();
+        assert_eq!(
+            german.suffix_bytes_slice(),
+            val.as_bytes().get(4..).unwrap_or_default(),
+        );
+    }
+
+    #[test]
+    fn test_as_str(val: String) {
+        let german = GermanStr::new(&val).unwrap();
+        assert_eq!(
+            german.as_str(),
+            &val,
+        );
+    }
+
+    #[test]
+    fn test_to_string(val: String) {
+        let german = GermanStr::new(&val).unwrap();
+        assert_eq!(
+            &german.to_string(),
+            &val,
+        );
+    }
+
+    #[test]
+    fn test_len(val: String) {
+        let german = GermanStr::new(&val).unwrap();
+        assert_eq!(
+            german.len(),
+            val.len(),
+        );
+    }
+
+    #[test]
+    fn test_is_empty(val: String) {
+        let german = GermanStr::new(&val).unwrap();
+        assert_eq!(
+            german.is_empty(),
+            val.is_empty(),
+        );
+    }
+
+    #[test]
+    fn test_debug(val: String) {
+        let german = GermanStr::new(&val).unwrap();
+        assert_eq!(
+            format!("{german:?}"),
+            format!("{val:?}"),
+        );
+    }
+
+    #[test]
+    fn test_display(val: String) {
+        let german = GermanStr::new(&val).unwrap();
+        assert_eq!(
+            format!("{german}"),
+            format!("{val}"),
+        );
+    }
+
+    #[test]
+    fn test_str_prefix(val: String) {
+        let german = GermanStr::new(&val).unwrap();
+        assert_eq!(
+            str_prefix::<GermanStr>(german),
+            str_prefix::<String>(val),
+        );
+    }
+
+    #[test]
+    fn test_str_suffix(val: String) {
+        let german = GermanStr::new(&val).unwrap();
+        assert_eq!(
+            str_suffix::<GermanStr>(&german),
+            str_suffix::<String>(&val),
+        );
+    }
+
+    #[test]
+    fn build_writer(values: Vec<String>) {
+        let mut writer = german_str::Writer::new();
+        let mut string = String::new();
+        for val in &values {
+            writer.write_str(val).unwrap();
+            string.push_str(val);
+        }
+        let german = Into::<GermanStr>::into(writer);
+        assert_eq!(german, string);
     }
 }
