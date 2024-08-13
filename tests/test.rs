@@ -209,3 +209,45 @@ proptest! {
         assert_eq!(german, string);
     }
 }
+
+#[cfg(feature = "serde")]
+mod serde_tests {
+    use std::collections::HashMap;
+    use std::hash::Hash;
+
+    use serde::{Deserialize, Serialize};
+
+    use super::*;
+
+    #[derive(Serialize, Deserialize)]
+    struct ExampleStruct<T: Eq + Hash> {
+        raw: T,
+        vec: Vec<T>,
+        map: HashMap<T, T>,
+    }
+
+    proptest! {
+        #[test]
+        fn roundtrip(raw: String, vec: Vec<String>, map: HashMap<String, String>) {
+            let initial = ExampleStruct { raw, vec, map };
+            let json = serde_json::to_string(&initial).unwrap();
+            let parsed = serde_json::from_str::<ExampleStruct<GermanStr>>(&json).unwrap();
+            assert_eq!(parsed.raw, initial.raw);
+            assert_eq!(parsed.vec, initial.vec);
+            let mut parsed_vec = parsed
+                .map
+                .iter()
+                .map(|(a, b)| (a.as_str(), b.as_str()))
+                .collect::<Vec<_>>();
+            parsed_vec.sort();
+
+            let mut initial_vec = initial
+                .map
+                .iter()
+                .map(|(a, b)| (a.as_str(), b.as_str()))
+                .collect::<Vec<_>>();
+            initial_vec.sort();
+            assert_eq!(parsed_vec, initial_vec);
+        }
+    }
+}
