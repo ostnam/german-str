@@ -414,22 +414,27 @@ impl Deref for GermanStr {
 
     #[inline(always)]
     fn deref(&self) -> &str {
-        let len = self.len as usize;
-        if len <= MAX_INLINE_BYTES {
-            let prefix_ptr: *const [u8; 4] = &self.prefix;
-            unsafe {
-                let slice = slice::from_raw_parts(prefix_ptr.cast(), len);
-                core::str::from_utf8_unchecked(slice)
-            }
-        } else {
-            unsafe {
-                let ptr = self.last8.ptr;
-                let slice = slice::from_raw_parts(
-                    ptr.as_non_null().as_ptr(),
-                    len,
-                );
-                core::str::from_utf8_unchecked(slice)
-            }
+        let ptr = self.heap_ptr()
+            .unwrap_or_else(|| unsafe {
+                // Safety:
+                // self.prefix can't be null since it comes from &self.
+                NonNull::new_unchecked(self.prefix.as_ptr().cast_mut())
+            });
+        unsafe {
+            // Safety:
+            // * Since we're making a &[u8], it is guaranteed to be aligned.
+            // * The pointer used is NonNull and part of a single object (self
+            // or the heap buffer).
+            // * The len of the slice is correct.
+            // * The len is shorter than isize::MAX (2^63 - 1, MAX_LEN == 2^32).
+            // * ptr + len < isize::MAX, or the heap buffer/struct would overflow usize::MAX.
+            let slice = slice::from_raw_parts(ptr.as_ptr(), self.len as usize);
+
+            // Safety:
+            // A `GermanStr` is guaranteed to be a valid UTF8 string,
+            // since it can only be constructed from an impl AsRef<str>,
+            // a String, or a Writer that accepts &str.
+            core::str::from_utf8_unchecked(slice)
         }
     }
 }
