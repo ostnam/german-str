@@ -12,15 +12,24 @@ use core::{cmp, fmt, ptr};
 use core::alloc::Layout;
 use core::borrow::Borrow;
 use core::ops::Deref;
+use core::ptr::NonNull;
 use core::str::FromStr;
 
-/// The maximum number of chars a GermanStr can contain before requiring a heap
-/// allocation.
+/// The maximum number of chars a GermanStr can contain before requiring
+/// a heap allocation.
 pub const MAX_INLINE_BYTES: usize = 12;
 
 /// The absolute maximum number of chars a GermanStr can hold.
 /// Since the len is an u32, it is 2^32.
 pub const MAX_LEN: usize = 2_usize.pow(32);
+
+/// Stored in stolen bits of the heap pointer, to indicate that it is an
+/// owned pointer and its heap allocation should be freed on drop.
+const OWNED_PTR: usize = 0;
+
+/// Stored in the stolen bits of the heap pointer, to indicate that it is a
+/// shared buffer and that the user is responsible for freeing it.
+const SHARED_PTR: usize = usize::MAX;
 
 /// A string type with the following properties:
 ///
@@ -44,17 +53,26 @@ pub struct GermanStr {
     /// because UTF-8 strings are ordered byte-wise.
     prefix: [u8; 4],
 
-    /// If the string is longer than 12 bytes, is an owning, unique pointer to
+    /// If the string is longer than 12 bytes, is a pointer to
     /// the chars on the heap.
-    /// Otherwise, is an `[u8; 8]`, with extra bytes set to 0.
-    /// The prefix is also included on the heap.
+    /// By default, this pointer is unique and has ownership of the allocation,
+    /// but the heap buffer can be shared if `leaky_shared_clone` is called,
+    /// in which case you are then responsible for freeing it correctly.
+    /// The prefix is also included in the buffer.
+    ///
+    /// If the string fits in 12 bytes, is an `[u8; 8]`, with extra bytes
+    /// set to 0 (the first 4 bytes being stored in `self.prefix`).
     last8: Last8,
 }
 
 #[derive(Copy, Clone)]
 /// Holds the last 8 bytes of a `GermanStr`.
 union Last8 {
-    ptr: *const u8,
+    /// Non-null pointer to u8 with 1 bit of virtual address space stolen.
+    ptr: ointers::NotNull<u8, 0, false, 1>,
+    // Safety:
+    // "If compiling for a 64bit arch, V must be at most 25": we have
+    // #![cfg(target_pointer_width = "64")] and V == 1.
 
     /// If the string is shorter than 12 bytes, extra bytes are set to 0.
     buf: [u8; 8],
@@ -86,9 +104,9 @@ impl GermanStr {
             // Safety: layout is not zero-sized (src.len() <= MAX_INLINE_BYTES guard).
             alloc::alloc::alloc(layout)
         };
-        if ptr.is_null() {
+        let Some(ptr) = NonNull::new(ptr) else {
             alloc::alloc::handle_alloc_error(layout);
-        }
+        };
         unsafe {
             // Safety:
             //   1. We assume src is a valid object.
@@ -96,12 +114,20 @@ impl GermanStr {
             //      for src.len() bytes.
             //   3. *_ u8 is always aligned.
             //   4. The 2 regions can't overlap since they belong to different objects.
-            ptr::copy_nonoverlapping(src.as_bytes().as_ptr(), ptr, src.len());
+            ptr::copy_nonoverlapping(
+                src.as_bytes().as_ptr(),
+                ptr.as_ptr(),
+                src.len(),
+            );
         }
+        let ointer = unsafe {
+            // Safety: see Last8.ptr declaration.
+            ointers::NotNull::new_stealing(ptr, OWNED_PTR)
+        };
         Ok(GermanStr {
             len: src.len() as u32,
             prefix: str_prefix::<&str>(&src),
-            last8: Last8 { ptr },
+            last8: Last8 { ptr: ointer },
         })
     }
 
@@ -134,16 +160,107 @@ impl GermanStr {
         }
     }
 
-    #[inline]
-    /// Safe accessor for last8.ptr.
-    fn get_heap_ptr(&self) -> Option<*const u8> {
+    #[inline(always)]
+    /// Returns the pointer to the heap-allocated buffer, if the `GermanStr`
+    /// isn't inlined.
+    /// In the actual GermanStr, 1 bit of the pointer is stolen to store
+    /// whether the heap allocation is shared or owned. Here, that bit is
+    /// reset to its default value before the pointer is returned.
+    /// `GermanStr::is_shared` can be used if you want to access that bit's
+    /// value.
+    pub fn heap_ptr(&self) -> Option<NonNull<u8>> {
+        self.heap_ointer()
+            .map(|ointer| ointer.as_non_null())
+    }
+
+    #[inline(always)]
+    /// Safe accessor for `self.last8.ptr`.
+    fn heap_ointer(&self) -> Option<ointers::NotNull<u8, 0, false, 1>> {
         if self.len as usize > MAX_INLINE_BYTES {
             Some(unsafe {
-                self.last8.ptr
+                    // Safety: self.len > MAX_INLINE_BYTES => self isn't inlined.
+                    self.last8.ptr
             })
         } else {
             None
         }
+    }
+
+
+    #[inline(always)]
+    /// Returns whether `self` is heap-allocated, and the buffer possibly
+    /// shared with other instances, as after calling `leaky_shared_clone`.
+    pub fn has_shared_buffer(&self) -> bool {
+        self.heap_ointer().is_some_and(|ptr| ptr.stolen() != OWNED_PTR)
+    }
+
+    #[inline]
+    /// Clones `self`, reusing the same heap-allocated buffer (unless `self`
+    /// is inlined).
+    ///
+    /// After calling this method, the heap buffer will not be freed when
+    /// `self` is `Drop`ped: you are responsible for manually managing
+    /// memory by calling `GermanStr::free` exactly once per heap buffer.
+    ///
+    /// Even after calling this method once, it should be called instead of
+    /// clone to make new copies that reuse the same buffer: calling `clone()`
+    /// will always create a new copy of the buffer.
+    ///
+    /// This can save memory and increase performance in the case where you
+    /// have many equal `GermanStr` longer than `MAX_INLINE_BYTES`.
+    pub fn leaky_shared_clone(&mut self) -> Self {
+        if self.is_heap_allocated() {
+            unsafe {
+                self.last8.ptr = self.last8.ptr.steal(SHARED_PTR);
+            }
+        }
+        GermanStr {
+            len: self.len,
+            prefix: self.prefix,
+            last8: self.last8,
+        }
+    }
+
+    /// Should be called to free the heap buffer of a shared `GermanStr`.
+    ///
+    /// # Safety
+    /// * `self` should be heap-allocated and not inlined (you can check with
+    /// `GermanStr::is_heap_allocated`).
+    /// * You should only free each buffer once.
+    ///
+    /// However, `free()`ing a heap allocated but non-shared `GermanStr` is
+    /// safe and equivalent to dropping it.
+    ///
+    /// To avoid double frees, you can simply store a set of freed pointers.
+    /// ```no_run
+    /// use std::collections::BTreeSet;
+    /// # use german_str::GermanStr;
+    ///
+    /// let mut freed = BTreeSet::new();
+    /// # let german_str: Vec<GermanStr> = Vec::new();
+    /// for s in german_str {
+    ///     let Some(ptr) = s.heap_ptr() else {
+    ///         continue; // skip inlined GermanStr
+    ///     };
+    ///     if freed.insert(ptr) {
+    ///         unsafe {
+    ///             // Safety:
+    ///             // 1. s is heap-allocated or s.heap_ptr() would be None.
+    ///             // 2. If ptr had already been freed, insert()'ing it would've returned false.
+    ///             s.free();
+    ///         }
+    ///     } else {
+    ///         std::mem::forget(s);
+    ///     }
+    /// }
+    /// ```
+    pub unsafe fn free(mut self) {
+        unsafe {
+            // Safety:
+            // the caller is responsible for checking that `self` isn't inlined.
+            self.last8.ptr = self.last8.ptr.steal(OWNED_PTR);
+        }
+        core::mem::drop(self)
     }
 
     #[inline]
@@ -172,7 +289,9 @@ impl GermanStr {
         let suffix_len = self.len().saturating_sub(4);
         if self.len as usize > MAX_INLINE_BYTES {
             unsafe {
-                let ptr = self.last8.ptr;
+                // Safety:
+                // self.len  > MAX_INLINE_BYTES => self.last8 is heap ptr.
+                let ptr = self.last8.ptr.as_non_null().as_ptr();
 
                 // Safety:
                 // 1. The data is part of a single object.
@@ -219,7 +338,7 @@ impl GermanStr {
 impl Clone for GermanStr {
     #[inline]
     fn clone(&self) -> Self {
-        if let Some(self_ptr) = self.get_heap_ptr() {
+        if let Some(self_ptr) = self.heap_ptr() {
             let (ptr, layout) = unsafe {
                 // Safety: If len was too high for this layout, we couldn't
                 // have made self in the first place.
@@ -229,20 +348,28 @@ impl Clone for GermanStr {
                 let ptr = alloc::alloc::alloc(layout);
                 (ptr, layout)
             };
-            if ptr.is_null() {
+            let Some(ptr) = NonNull::new(ptr) else {
                 alloc::alloc::handle_alloc_error(layout);
-            }
+            };
             unsafe {
                 // Safety:
                 //   1. Both pointers are valid.
                 //   2. *_ u8 is always aligned.
                 //   3. The 2 regions can't overlap since they belong to different objects.
-                ptr::copy_nonoverlapping(self_ptr, ptr, self.len());
+                ptr::copy_nonoverlapping(
+                    self_ptr.as_ptr(),
+                    ptr.as_ptr(),
+                    self.len(),
+                );
             }
+            let ointer = unsafe {
+                // Safety: see Last8.ptr declaration.
+                ointers::NotNull::new_stealing(ptr, OWNED_PTR)
+            };
             GermanStr {
                 prefix: self.prefix,
                 len: self.len,
-                last8: Last8 { ptr },
+                last8: Last8 { ptr: ointer },
             }
         } else {
             GermanStr {
@@ -257,18 +384,19 @@ impl Clone for GermanStr {
 impl Drop for GermanStr {
     #[inline]
     fn drop(&mut self) {
-        if let Some(ptr) = self.get_heap_ptr() {
-            let ptr = ptr.cast_mut();
-            unsafe {
-                // Safety: this call can only fail if self.len is too long.
-                // We can only create a long `GermanStr` using GermanStr::new: if `self.len`
-                // was too long, we'd get an error when we try to create the GermanStr.
-                let layout = Layout::array::<u8>(self.len as usize).unwrap_unchecked();
-                alloc::alloc::dealloc(ptr, layout);
-            }
+        let ptr = match self.heap_ptr() {
+            Some(ptr) if !self.has_shared_buffer() => ptr,
+            Some(_) | None => return,
+            // If the heap buffer is shared, or the string is inlined,
+            // dropping should be a no-op.
+        };
+        unsafe {
+            // Safety: this call can only fail if self.len is too long.
+            // We can only create a long `GermanStr` using GermanStr::new: if `self.len`
+            // was too long, we'd get an error when we try to create the GermanStr.
+            let layout = Layout::array::<u8>(self.len as usize).unwrap_unchecked();
+            alloc::alloc::dealloc(ptr.as_ptr(), layout);
         }
-        // In the case where len <= MAX_INLINE_BYTES, no heap data is owned and
-        // no deallocation is needed.
     }
 }
 
@@ -296,7 +424,10 @@ impl Deref for GermanStr {
         } else {
             unsafe {
                 let ptr = self.last8.ptr;
-                let slice = slice::from_raw_parts(ptr, len);
+                let slice = slice::from_raw_parts(
+                    ptr.as_non_null().as_ptr(),
+                    len,
+                );
                 core::str::from_utf8_unchecked(slice)
             }
         }
@@ -641,11 +772,17 @@ impl From<Writer> for GermanStr {
             }
         } else {
             let heap_ref = value.heap.leak(); // avoid copying the str
-            let ptr = heap_ref.as_ptr();
+            let non_null = unsafe {
+                NonNull::new_unchecked(heap_ref.as_mut_ptr())
+            };
+            let ointer = unsafe {
+                // Safety: see Last8.ptr declaration.
+                ointers::NotNull::new_stealing(non_null, OWNED_PTR)
+            };
             GermanStr {
                 len: value.len as u32,
                 prefix: str_prefix::<&str>(heap_ref),
-                last8: Last8 { ptr },
+                last8: Last8 { ptr: ointer },
             }
         }
     }

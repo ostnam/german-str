@@ -48,6 +48,25 @@ fn test_default() {
     );
 }
 
+#[test]
+fn test_leak() {
+    let short = GermanStr::new("short").unwrap();
+    assert!(!short.is_heap_allocated());
+    assert!(!short.has_shared_buffer());
+
+    let mut leaked = GermanStr::new("this is obviously longer than 12 bytes").unwrap();
+    let og = leaked.clone();
+    assert!(leaked.is_heap_allocated());
+    assert!(!leaked.has_shared_buffer());
+    let leaked_copy = leaked.leaky_shared_clone();
+    assert!(leaked_copy.is_heap_allocated());
+    assert!(leaked.has_shared_buffer());
+    assert!(leaked_copy.has_shared_buffer());
+    assert_eq!(og, leaked);
+    assert_eq!(leaked, leaked_copy);
+    assert_eq!(leaked.heap_ptr(), leaked_copy.heap_ptr());
+}
+
 proptest! {
     #[test]
     fn conversion(src: String) {

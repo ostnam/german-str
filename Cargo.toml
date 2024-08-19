@@ -8,6 +8,7 @@ repository = "https://github.com/ostnam/german-str"
 
 [dependencies]
 arbitrary = { version = "1.3.2", optional = true }
+ointers = "4.0.1"
 serde = { version = "1.0.204", optional = true, default-features = false }
 
 [dev-dependencies]
