@@ -458,9 +458,7 @@ impl Ord for GermanStr {
     #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
         self.prefix.cmp(&other.prefix)
-            .then_with(
-                || self.suffix_bytes_slice().cmp(other.suffix_bytes_slice())
-            )
+            .then_with(|| self.suffix_bytes_slice().cmp(other.suffix_bytes_slice()))
     }
 }
 
