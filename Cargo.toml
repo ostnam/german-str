@@ -25,5 +25,5 @@ default = []
 serde = ["serde/std"]
 
 [[bench]]
-name = "bench_vec_sorting"
+name = "benches"
 harness = false
