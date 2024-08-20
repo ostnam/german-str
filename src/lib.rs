@@ -330,8 +330,15 @@ impl GermanStr {
     }
 
     #[inline(always)]
+    /// Returns whether a heap allocation is used to store the string.
     pub const fn is_heap_allocated(&self) -> bool {
         self.len as usize > MAX_INLINE_BYTES
+    }
+
+    #[inline(always)]
+    /// Returns whether the string is stored entirely within `self`, without a heap allocation.
+    pub const fn is_inlined(&self) -> bool {
+        !self.is_heap_allocated()
     }
 }
 
@@ -449,16 +456,43 @@ impl AsRef<str> for GermanStr {
 impl PartialEq<GermanStr> for GermanStr {
     #[inline(always)]
     fn eq(&self, other: &GermanStr) -> bool {
-        self.prefix == other.prefix && self.suffix_bytes_slice() == other.suffix_bytes_slice()
+        let prefixes_equal = self.prefix == other.prefix;
+        if !prefixes_equal {
+            return false;
+        } else if self.len <= 4 && other.len <= 4 {
+            return true;
+        }
+
+        if self.is_inlined() && other.is_inlined() {
+            return unsafe {
+                // Safety: obviously both strings are stored inline.
+                self.last8.buf == other.last8.buf
+            };
+        }
+
+        return self.suffix_bytes_slice() == other.suffix_bytes_slice();
     }
 }
+
 impl Eq for GermanStr {}
 
 impl Ord for GermanStr {
     #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
-        self.prefix.cmp(&other.prefix)
-            .then_with(|| self.suffix_bytes_slice().cmp(other.suffix_bytes_slice()))
+        self.prefix
+            .cmp(&other.prefix)
+            .then_with(||
+                if self.len <= 4 && other.len <= 4 {
+                    cmp::Ordering::Equal
+                } else if self.is_inlined() && other.is_inlined() {
+                    unsafe {
+                        // Safety: obviously both strings are stored inline.
+                        self.last8.buf.cmp(&other.last8.buf)
+                    }
+                } else {
+                    self.suffix_bytes_slice().cmp(other.suffix_bytes_slice())
+                }
+            )
     }
 }
 
