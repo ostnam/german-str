@@ -1,4 +1,10 @@
-# german-str
+# german-str &emsp; [![Latest Version]][crates.io] [![Documentation]][docs]
+
+[Latest Version]: https://img.shields.io/crates/v/german-str
+[crates.io]: https://crates.io/crates/german-str
+[Documentation]: https://docs.rs/german-str/badge.svg
+[docs]: https://docs.rs/german-str
+
 German strings are a string type with the follow properties:
 
 * They are immutable.
